@@ -1,14 +1,10 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"log"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 // Coffee представляет продукт
@@ -20,15 +16,6 @@ type Coffee struct {
 	Cost        string
 	Article     string
 }
-type Order struct {
-	OrderID   int       `db:"order_id" json:"order_id"`
-	UserID    int       `db:"user_id" json:"user_id"`
-	Total     float64   `db:"total" json:"total"`
-	Status    string    `db:"status" json:"status"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-}
-
-var dbPool *pgxpool.Pool
 
 // Пример списка продуктов
 var coffees = []Coffee{
@@ -42,86 +29,6 @@ var coffees = []Coffee{
 	{ID: 7, ImageURL: "https://cafecentral.wien/wp-content/uploads/einspaenner_cafecentral.jpg", Title: "Венский кофе", Description: "Это сочетание крепкого чёрного кофе и пенки из взбитых сливок. Последняя аккуратно размещается на поверхности кофе без размешивания.", Cost: "230", Article: "84544447"},
 	{ID: 8, ImageURL: "https://i.pinimg.com/736x/03/d9/d2/03d9d27010057294eded352af161340f.jpg", Title: "Моккачино", Description: "Это кофейный напиток, который напоминает капучино или латте, но с добавлением шоколадного соуса.", Cost: "190", Article: "89370190"},
 	{ID: 9, ImageURL: "https://lafoy.ru/photo_l/foto-2426-19.jpg", Title: "Бомбон", Description: "Он состоит из эспрессо и сгущённого молока. Этот напиток прекрасно подойдёт на завтрак и зарядит бодростью и хорошим настроением на целый день.", Cost: "175", Article: "59247291"},
-}
-
-// GetOrders обрабатывает GET-запрос для получения заказов пользователя
-func GetOrders(db *pgxpool.Pool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Получаем user_id из параметров маршрута
-		idStr := r.URL.Path[len("/orders/"):]
-		userID, err := strconv.Atoi(idStr)
-		if err != nil {
-			http.Error(w, "Invalid user ID", http.StatusBadRequest)
-			return
-		}
-
-		// Выполняем запрос к базе данных
-		rows, err := db.Query(context.Background(), `SELECT order_id, user_id, total, status, created_at FROM orders WHERE user_id = $1`, userID)
-		if err != nil {
-			http.Error(w, "Failed to query database", http.StatusInternalServerError)
-			log.Println("Query error:", err)
-			return
-		}
-		defer rows.Close()
-
-		// Собираем список заказов
-		var orders []Order
-		for rows.Next() {
-			var order Order
-			if err := rows.Scan(&order.OrderID, &order.UserID, &order.Total, &order.Status, &order.CreatedAt); err != nil {
-				http.Error(w, "Failed to parse orders", http.StatusInternalServerError)
-				log.Println("Scan error:", err)
-				return
-			}
-			orders = append(orders, order)
-		}
-
-		// Возвращаем заказы в формате JSON
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(orders)
-	}
-}
-
-// CreateOrder обрабатывает POST-запрос для создания нового заказа
-func CreateOrder(db *pgxpool.Pool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Получаем user_id из параметров маршрута
-		idStr := r.URL.Path[len("/orders/"):]
-		userID, err := strconv.Atoi(idStr)
-		if err != nil {
-			http.Error(w, "Invalid user ID", http.StatusBadRequest)
-			return
-		}
-
-		// Декодируем тело запроса
-		var order Order
-		err = json.NewDecoder(r.Body).Decode(&order)
-		if err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
-
-		// Устанавливаем user_id для заказа
-		order.UserID = userID
-		order.CreatedAt = time.Now()
-
-		// Выполняем запрос на добавление заказа
-		err = db.QueryRow(
-			context.Background(),
-			`INSERT INTO orders (user_id, total, status, created_at) 
-			 VALUES ($1, $2, $3, $4) RETURNING order_id`,
-			order.UserID, order.Total, order.Status, order.CreatedAt,
-		).Scan(&order.OrderID)
-		if err != nil {
-			http.Error(w, "Failed to insert order", http.StatusInternalServerError)
-			log.Println("Insert error:", err)
-			return
-		}
-
-		// Возвращаем созданный заказ
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(order)
-	}
 }
 
 // обработчик для GET-запроса, возвращает список продуктов
@@ -258,15 +165,6 @@ func updateCoffeeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// Подключение к базе данных PostgreSQL
-	db, err := pgxpool.New(context.Background(), "postgresql://postgres:03082004Lisa@localhost:5432/shop")
-	if err != nil {
-		log.Fatalf("Unable to connect to database: %v\n", err)
-	}
-	defer db.Close()
-	dbPool = db
-	http.HandleFunc("/orders/", GetOrders(db))
-	http.HandleFunc("/orders/create/", CreateOrder(db))
 	http.HandleFunc("/coffees", getCoffeeHandler)           // Получить все продукты
 	http.HandleFunc("/coffee/create", createCoffeeHandler)  // Создать продукт
 	http.HandleFunc("/coffee/", getCoffeeByIDHandler)       // Получить продукт по ID
